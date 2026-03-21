@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Runtime outputs
+inspection.log
+defects_log.csv
+defects/
+learn_labels_results.csv
+learn_labels_contact-*.png
+learn_labels_summary.png
+debug_roi_*.png
