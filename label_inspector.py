@@ -673,15 +673,23 @@ def build_display(
 
     overall_passed = all(r["passed"] for r in label_results.values()) if label_results else True
 
-    # --- Panel A: full frame with ROI overlay ----------------------------
-    panel_a = _resize(draw_roi_on_frame(frame, detections_xy))
+    # --- Panel A: reference image -------------------------------------------
     status_text  = "PASS" if overall_passed else "FAIL"
     status_color = (0, 220, 0) if overall_passed else (0, 0, 220)
-    cv2.putText(panel_a, status_text,
-                (10, 40), cv2.FONT_HERSHEY_DUPLEX, 1.4, status_color, 3)
-    cv2.putText(panel_a, f"FPS: {fps:.1f}",
-                (10, ph - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (220, 220, 0), 2)
+    panel_a = np.zeros((ph, pw, 3), dtype=np.uint8)
+    panel_a[:] = (25, 25, 25)
+    if reference is not None:
+        rh_a, rw_a = reference.shape[:2]
+        scale_a = min(pw / rw_a, ph / rh_a)
+        tw_a, th_a = int(rw_a * scale_a), int(rh_a * scale_a)
+        ref_full = cv2.resize(reference, (tw_a, th_a), interpolation=cv2.INTER_AREA)
+        x_a = (pw - tw_a) // 2
+        y_a = (ph - th_a) // 2
+        panel_a[y_a:y_a + th_a, x_a:x_a + tw_a] = ref_full
+    cv2.putText(panel_a, "A", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+    cv2.putText(panel_a, "Reference", (28, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 200), 1)
 
+    _crop_panel_labels = {"above": "B", "below": "C"}
     def _crop_panel(pos: str) -> np.ndarray:
         r = label_results.get(pos)
         if r is None:
@@ -689,9 +697,10 @@ def build_display(
         p = _resize(r["crop"])
         p_txt = "PASS" if r["passed"] else "FAIL"
         p_col = (0, 220, 0) if r["passed"] else (0, 0, 220)
+        cv2.putText(p, _crop_panel_labels.get(pos, ""), (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
         cv2.putText(p, f"{pos}  SSIM={r['ssim_score']:.4f}",
-                    (8, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 2)
-        cv2.putText(p, p_txt, (8, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.8, p_col, 2)
+                    (8, 44), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (220, 220, 220), 2)
+        cv2.putText(p, p_txt, (8, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.6, p_col, 2)
         return p
 
     def _diff_panel(pos: str) -> np.ndarray:
@@ -704,29 +713,24 @@ def build_display(
         return p
 
 
-    # --- Panel D: reference image (left) + session status (right) --------
-    panel_d = np.zeros((ph, pw, 3), dtype=np.uint8)
-    panel_d[:] = (25, 25, 25)
-    ref_w = pw // 2
-    if reference is not None:
-        ref_thumb = cv2.resize(reference, (ref_w, ph), interpolation=cv2.INTER_AREA)
-        panel_d[:, :ref_w] = ref_thumb
-        cv2.putText(panel_d, "Reference",
-                    (4, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 200, 200), 1)
-    stats_x = ref_w + 8
+    # --- Panel D: live frame with overlays ----------------------------------
+    panel_d = _resize(draw_roi_on_frame(frame, detections_xy))
+    cv2.putText(panel_d, "D", (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+    cv2.putText(panel_d, status_text,
+                (10, 40), cv2.FONT_HERSHEY_DUPLEX, 1.4, status_color, 3)
+    cv2.putText(panel_d, f"FPS: {fps:.1f}",
+                (10, ph - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (220, 220, 0), 2)
     lines = [
         ("Session Status", (0, 200, 200), 0.6, 2),
         (f"Frames : {stats.get('frames', 0)}",       (200, 200, 200), 0.5, 1),
         (f"Both   : {stats.get('both', 0)}",          (200, 200, 200), 0.5, 1),
-        (f"Abv only:{stats.get('above_only', 0)}",   (200, 200, 200), 0.5, 1),
-        (f"Blw only:{stats.get('below_only', 0)}",   (200, 200, 200), 0.5, 1),
         (f"A PASS : {stats.get('above_pass_pct', 0.0):.1f}%", (0, 220, 0), 0.5, 1),
         (f"B PASS : {stats.get('below_pass_pct', 0.0):.1f}%", (0, 220, 0), 0.5, 1),
         (f"Defects: {stats.get('defects', 0)}",      (0, 80, 220), 0.5, 1),
     ]
     for i, (text, color, scale, thickness) in enumerate(lines):
         cv2.putText(panel_d, text,
-                    (stats_x, 30 + i * 38), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness)
+                    (pw - 180, 30 + i * 28), cv2.FONT_HERSHEY_SIMPLEX, scale, color, thickness)
 
     # --- Stitch 3x2 grid -------------------------------------------------
     top_row    = np.hstack([panel_a, _crop_panel("above"), _crop_panel("below")])
@@ -858,8 +862,23 @@ def main() -> None:
     t_prev:       float = time.perf_counter()
 
     log.info("Running — press 'q' to quit, 's' to save current crop as reference.")
-    cv2.namedWindow("Label Inspector", cv2.WINDOW_NORMAL)
-    cv2.resizeWindow("Label Inspector", PANEL_W * 3, PANEL_H * 2)
+
+    # --- Detect physical screen resolution to size panels correctly --------
+    try:
+        import subprocess as _sp, re as _re
+        _out = _sp.check_output(["system_profiler", "SPDisplaysDataType"], text=True)
+        _m = _re.search(r"Resolution:\s*(\d+)\s*x\s*(\d+)", _out)
+        if _m:
+            _screen_w, _screen_h = int(_m.group(1)), int(_m.group(2))
+            global PANEL_W, PANEL_H
+            PANEL_W = _screen_w // 3
+            PANEL_H = _screen_h // 2
+            log.info(f"Screen {_screen_w}x{_screen_h} -> panel {PANEL_W}x{PANEL_H}")
+    except Exception:
+        pass
+
+    cv2.namedWindow("Label Inspector", cv2.WINDOW_NORMAL | cv2.WINDOW_FREERATIO)
+    cv2.setWindowProperty("Label Inspector", cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     while True:
         # ── Grab latest frame ────────────────────────────────────────────
