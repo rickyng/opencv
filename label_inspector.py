@@ -75,6 +75,10 @@ reference_image_path = "golden_reference.png"
 # VIDEO_LOOP = False stops the program when the video ends.
 VIDEO_LOOP = False
 
+# Debug: pause after every label detection and wait for a keypress to continue.
+# Press any key (except 'q'/'s') to advance; 'q' still quits.
+DEBUG_STEP_MODE = True
+
 # When CAMERA_INDEX is a video file, fire a label trigger every N frames
 # instead of using optical flow (which requires real web motion).
 # At 30 fps: 90 frames = 3 s per label.  Adjust to match your label pitch.
@@ -392,7 +396,10 @@ def crop_labels(frame: np.ndarray, ref_gray: np.ndarray) -> "dict[str, np.ndarra
     fh = frame.shape[0]
     crops = {}
     for rank, (x, y, _) in enumerate(detections_sorted):
-        position = "above" if (len(detections_sorted) == 1 and y < fh // 2) or rank == 0 else "below"
+        if len(detections_sorted) == 1:
+            position = "above" if y < fh // 2 else "below"
+        else:
+            position = "above" if rank == 0 else "below"
         crop = frame[y:y + LABEL_H_PX, x:x + LABEL_W_PX]
         if crop.size == 0:
             continue
@@ -574,11 +581,11 @@ def compare_labels(
     ref_resized = cv2.resize(reference, (crop.shape[1], crop.shape[0]),
                              interpolation=cv2.INTER_AREA)
 
+    gray_crop = cv2.cvtColor(crop,        cv2.COLOR_BGR2GRAY)
+    gray_ref  = cv2.cvtColor(ref_resized, cv2.COLOR_BGR2GRAY)
+
     # --- Metric 1: absolute-difference defect ratio ----------------------
-    diff_gray = cv2.absdiff(
-        cv2.cvtColor(crop,        cv2.COLOR_BGR2GRAY),
-        cv2.cvtColor(ref_resized, cv2.COLOR_BGR2GRAY),
-    )
+    diff_gray = cv2.absdiff(gray_crop, gray_ref)
     _, diff_bin = cv2.threshold(
         diff_gray, DIFF_BINARIZE_THR, 255, cv2.THRESH_BINARY
     )
@@ -592,9 +599,7 @@ def compare_labels(
     ssim_score, ssim_vis = compute_ssim(crop, ref_resized)
 
     # --- Metric 3: template match ----------------------------------------
-    gray_crop = cv2.cvtColor(crop,        cv2.COLOR_BGR2GRAY)
-    gray_ref  = cv2.cvtColor(ref_resized, cv2.COLOR_BGR2GRAY)
-    res       = cv2.matchTemplate(gray_crop, gray_ref, cv2.TM_CCOEFF_NORMED)
+    res          = cv2.matchTemplate(gray_crop, gray_ref, cv2.TM_CCOEFF_NORMED)
     tmatch_score = float(res[0, 0])
 
     # --- PASS / FAIL decision --------------------------------------------
@@ -1002,7 +1007,13 @@ def main() -> None:
         cv2.imshow("Label Inspector", display)
 
         # ── Key handler ──────────────────────────────────────────────────
-        key = cv2.waitKey(1) & 0xFF
+        # In step mode, block after a label detection until a key is pressed;
+        # otherwise poll with a 1 ms timeout so the display stays responsive.
+        if DEBUG_STEP_MODE and crops:
+            log.info("[DEBUG] Paused — press any key to continue, 'q' to quit.")
+            key = cv2.waitKey(0) & 0xFF
+        else:
+            key = cv2.waitKey(1) & 0xFF
 
         if key == ord("q"):
             log.info("Quit key pressed.")

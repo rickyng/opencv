@@ -21,11 +21,11 @@ import numpy as np
 
 # ── Config (keep in sync with label_inspector.py) ────────────────────────────
 VIDEO_PATH           = "demo.mp4"
-REFERENCE_PATH       = "golden_label.jpeg"  # must match label_inspector.py reference_image_path
+REFERENCE_PATH       = "golden_reference.png"  # must match label_inspector.py reference_image_path
 camera_pixels_per_cm = 59
-label_width_cm       = 4.1
-label_height_cm      = 3.7
-roi_top_offset_cm    = 4.9
+label_width_cm       = 4.0
+label_height_cm      = 4.0
+roi_top_offset_cm    = 4.5
 # ─────────────────────────────────────────────────────────────────────────────
 
 LABEL_W_PX = int(label_width_cm  * camera_pixels_per_cm)
